@@ -1,0 +1,12 @@
+Usage: sz_epaper.py [options]
+Download PDF E-Paper of German newspaper "Süddeutsche Zeitung".
+
+Options:
+  -h --help                 show this help message and exit
+  -v --verbose              print status messages
+  -u --username <user>      set username for SZ E-Paper (required)
+  -p --password <pass>      set password for SZ E-Paper (required)
+  -e --edition <edition>    select edition to download (see --list-editions)
+                            [default: "deutschland_full"]
+  -i --issue <date>         select issue to download (e.g. 2012-04-14) [default: "today"]
+  --list-editions           List all available editions
