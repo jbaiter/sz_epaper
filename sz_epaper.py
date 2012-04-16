@@ -9,12 +9,15 @@ Options:
   -v --verbose              print status messages
   -u --username <user>      set username for SZ E-Paper (required)
   -p --password <pass>      set password for SZ E-Paper (required)
+  -d --directory <dir>      select directory to store issue to [default: "./"]
   -e --edition <edition>    select edition to download (see --list-editions)
                             [default: "deutschland_full"]
-  -i --issue <date>         select issue to download (e.g. 2012-04-14) [default: "today"]
+  -i --issue <date>         select issue to download (e.g. 2012-04-14)
+                            [default: "today"]
   --list-editions           List all available editions
 """
 
+import logging
 import os
 import sys
 from datetime import date
@@ -33,7 +36,9 @@ class SueddeutscheEPaper(object):
                 'stadt_full': '%s_Stadtausgabe_komplett.pdf'}
     
     def __init__(self, user, password):
+        self._logger = logging.getLogger(__name__)
         self._session = requests.session()
+        self._logger.info("Logging into SZ as user \"%s\"" % user)
         self._session.post(SueddeutscheEPaper.LOGIN_URL,
                            data={'sdeusername': user,
                                  'sdepasswort': password},
@@ -42,37 +47,25 @@ class SueddeutscheEPaper(object):
     def get_issue(self, edition='bayern_full', date=date.today()):
         # TODO: Throw an exception on holidays as well (e.g. no issue on
         #       25/12/2012)
-        # TODO: Throw an exception if the issue can't be obtained (i.e.
-        #       response type is XHTML and not PDF)
-        # TODO: Add logging
         if date.weekday() == 6:
             raise Exception('No Sueddeutsche Zeitung on Sundays!')
         pdf_name = SueddeutscheEPaper.EDITIONS[edition] % date.strftime('%Y%m%d')
         pdf_raw = self._session.get(SueddeutscheEPaper.DOWNLOAD_URL+pdf_name,
                                      params={'file': pdf_name}).raw
-        # FIXME: Should this really be part of the class?
-        self._write_file(pdf_raw, pdf_name)
-        if date >= date.today():
-            try:
-                os.remove('current_issue.pdf')
-            except:
-                pass
-            os.symlink(pdf_name, 'current_issue.pdf')
-    
-    def _write_file(self, raw_data, fname):
-        CHUNK = 64*1024
-        with open(fname, 'w') as fp:
-            while True:
-                chunk = raw_data.read(CHUNK)
-                if not chunk:
-                    break
-                fp.write(chunk)
+        self._logger.info("Downloading issue \"%s\"" % pdf_name)
+        # If an issue is not available to download, we get a file with
+        # length 0, not a 404...
+        if pdf_raw._fp.length == 0:
+            raise Exception('Download of selected issue failed, maybe it is too old?')
+        self._logger.debug("Size of issue is %d bytes" % pdf_raw._fp.length)
+        return (pdf_name, pdf_raw)
 
 
 if __name__ == '__main__':
-    # TODO: Add option to display list of all available issues
-    # TODO: Add option to specify a target directory for the downloaded issues
     options, arguments = docopt(__doc__)
+    if options.verbose:
+        logging.basicConfig(level=logging.INFO,
+                            format='%(asctime)s - %(levelname)s - %(message)s')
     if options.list_editions:
         print "Available editions:"
         for edition in SueddeutscheEPaper.EDITIONS.keys():
@@ -90,4 +83,17 @@ if __name__ == '__main__':
         issue_date = date(*(int(x) for x in options.issue.split('-')))
 
     sz = SueddeutscheEPaper(options.username, options.password)
-    sz.get_issue(options.edition, issue_date)
+    issue_name, issue_fobj = sz.get_issue(options.edition, issue_date)
+
+    with open(os.path.join(options.directory, issue_name), 'w') as fp:
+        while True:
+            chunk = issue_fobj.read(64*1024)
+            if not chunk:
+                break
+            fp.write(chunk)
+
+    if issue_date >= date.today():
+        try: os.remove(os.path.join(options.directory, "current.pdf"))
+        except: pass
+        os.symlink(os.path.join(options.directory, issue_name),
+                   os.path.join(options.directory, "current.pdf"))
